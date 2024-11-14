@@ -8,6 +8,8 @@ import (
 )
 
 const defaultOutputFilename = "index.ts"
+const defaultFallbackType = "any"
+const defaultPreserveComments = "default"
 
 type PackageConfig struct {
 	// The package path just like you would import it in Go
@@ -50,6 +52,15 @@ type PackageConfig struct {
 	// In "types" mode, only type comments are preserved.
 	// If "none" is supplied, no comments are preserved.
 	PreserveComments string `yaml:"preserve_comments"`
+
+	// Default interface for Typescript-generated interfaces to extend.
+	Extends string `yaml:"extends"`
+
+	// Set the optional type (null or undefined).
+	// Supported values: "default", "undefined" (same as "default"), "" (same as "default"), "null".
+	// Default is "undefined".
+	// Useful for usage with JSON marshalers that output null for optional fields (e.g. gofiber JSON).
+	OptionalType string `yaml:"optional_type"`
 }
 
 type Config struct {
@@ -68,21 +79,12 @@ func (c Config) PackageNames() []string {
 func (c Config) PackageConfig(packagePath string) *PackageConfig {
 	for _, pc := range c.Packages {
 		if pc.Path == packagePath {
-			if pc.Indent == "" {
-				pc.Indent = "  "
+			pcNormalized, err := pc.Normalize()
+			if err != nil {
+				log.Fatalf("Error in config for package %s: %s", packagePath, err)
 			}
 
-			var err error
-			pc.Flavor, err = normalizeFlavor(pc.Flavor)
-			if err != nil {
-				log.Fatalf("Invalid config for package %s: %s", packagePath, err)
-			}
-
-			pc.PreserveComments, err = normalizePreserveComments(pc.PreserveComments)
-			if err != nil {
-				log.Fatalf("Invalid config for package %s: %s", packagePath, err)
-			}
-			return pc
+			return &pcNormalized
 		}
 	}
 	log.Fatalf("Config not found for package %s", packagePath)
@@ -110,6 +112,17 @@ func normalizePreserveComments(preserveComments string) (string, error) {
 		return "none", nil
 	default:
 		return "", fmt.Errorf("unsupported preserve_comments: %s", preserveComments)
+	}
+}
+
+func normalizeOptionalType(optional string) (string, error) {
+	switch optional {
+	case "", "default", "undefined":
+		return "undefined", nil
+	case "null":
+		return "null", nil
+	default:
+		return "", fmt.Errorf("unsupported optional: %s", optional)
 	}
 }
 
@@ -141,4 +154,37 @@ func (c PackageConfig) ResolvedOutputPath(packageDir string) string {
 		return filepath.Join(c.OutputPath, defaultOutputFilename)
 	}
 	return c.OutputPath
+}
+
+// Normalize returns a new PackageConfig with default values set.
+func (pc PackageConfig) Normalize() (PackageConfig, error) {
+	if pc.Indent == "" {
+		pc.Indent = "  "
+	}
+
+	if pc.FallbackType == "" {
+		pc.FallbackType = defaultFallbackType
+	}
+
+	if pc.PreserveComments == "" {
+		pc.PreserveComments = defaultPreserveComments
+	}
+
+	var err error
+	pc.Flavor, err = normalizeFlavor(pc.Flavor)
+	if err != nil {
+		return pc, fmt.Errorf("invalid flavor config for package %s: %s", pc.Path, err)
+	}
+
+	pc.PreserveComments, err = normalizePreserveComments(pc.PreserveComments)
+	if err != nil {
+		return pc, fmt.Errorf("invalid preserve_comments config for package %s: %s", pc.Path, err)
+	}
+
+	pc.OptionalType, err = normalizeOptionalType(pc.OptionalType)
+	if err != nil {
+		return pc, fmt.Errorf("invalid optional_type config for package %s: %s", pc.Path, err)
+	}
+
+	return pc, nil
 }

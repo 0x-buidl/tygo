@@ -15,9 +15,36 @@ type groupContext struct {
 	groupValue           string
 	groupType            string
 	iotaValue            int
-	iotaOffset           int
 }
 
+// isEmitVar returns true if dec is a string var with a tygo:emit directive.
+func (g *PackageGenerator) isEmitVar(dec *ast.GenDecl) bool {
+	if dec.Tok != token.VAR || dec.Doc == nil {
+		return false
+	}
+
+	for _, c := range dec.Doc.List {
+		if strings.HasPrefix(c.Text, "//tygo:emit") {
+			// we know it's VAR so asserting *ast.ValueSpec is OK.
+			v, ok := dec.Specs[0].(*ast.ValueSpec).Values[0].(*ast.BasicLit)
+			if !ok {
+				return false
+			}
+			return v.Kind == token.STRING
+		}
+	}
+	return false
+}
+
+// emitVar emits the text associated with dec, which is assumes to be a string var with a
+// tygo:emit directive, as tested by isEmitVar.
+func (g *PackageGenerator) emitVar(s *strings.Builder, dec *ast.GenDecl) {
+	v := dec.Specs[0].(*ast.ValueSpec).Values[0].(*ast.BasicLit).Value
+	if len(v) < 2 {
+		return
+	}
+	s.WriteString(v[1:len(v)-1] + "\n")
+}
 func (g *PackageGenerator) writeGroupDecl(s *strings.Builder, decl *ast.GenDecl) {
 	// This checks whether the declaration is a group declaration like:
 	// const (
@@ -86,6 +113,10 @@ func (g *PackageGenerator) writeTypeSpec(
 	if isStruct {
 		s.WriteString("export interface ")
 		s.WriteString(ts.Name.Name)
+		if g.conf.Extends != "" {
+			s.WriteString(" extends ")
+			s.WriteString(g.conf.Extends)
+		}
 
 		if ts.TypeParams != nil {
 			g.writeTypeParamsFields(s, ts.TypeParams.List)
@@ -109,8 +140,13 @@ func (g *PackageGenerator) writeTypeSpec(
 	if !isStruct && !isIdent {
 		s.WriteString("export type ")
 		s.WriteString(ts.Name.Name)
+
+		if ts.TypeParams != nil {
+			g.writeTypeParamsFields(s, ts.TypeParams.List)
+		}
+
 		s.WriteString(" = ")
-		g.writeType(s, ts.Type, 0, true)
+		g.writeType(s, ts.Type, nil, 0, true)
 		s.WriteString(";")
 
 	}
@@ -186,7 +222,7 @@ func (g *PackageGenerator) writeValueSpec(
 			s.WriteString(": ")
 
 			tempSB := &strings.Builder{}
-			g.writeType(tempSB, vs.Type, 0, true)
+			g.writeType(tempSB, vs.Type, nil, 0, true)
 			typeString := tempSB.String()
 
 			s.WriteString(typeString)
@@ -201,25 +237,16 @@ func (g *PackageGenerator) writeValueSpec(
 		if hasExplicitValue {
 			val := vs.Values[i]
 			tempSB := &strings.Builder{}
-			g.writeType(tempSB, val, 0, true)
-			valueString := tempSB.String()
-
-			if isProbablyIotaType(valueString) {
-				group.iotaOffset = basicIotaOffsetValueParse(valueString)
-				group.groupValue = "iota"
-				valueString = fmt.Sprint(group.iotaValue + group.iotaOffset)
-			} else {
-				group.groupValue = valueString
-			}
-			s.WriteString(valueString)
-
-		} else { // We must use the previous value or +1 in case of iota
-			valueString := group.groupValue
-			if group.groupValue == "iota" {
-				valueString = fmt.Sprint(group.iotaValue + group.iotaOffset)
-			}
-			s.WriteString(valueString)
+			// log.Println("const:", name.Name, reflect.TypeOf(val), val)
+			g.writeType(tempSB, val, nil, 0, false)
+			group.groupValue = tempSB.String()
 		}
+
+		valueString := group.groupValue
+		if isProbablyIotaType(valueString) {
+			valueString = replaceIotaValue(valueString, group.iotaValue)
+		}
+		s.WriteString(valueString)
 
 		s.WriteByte(';')
 

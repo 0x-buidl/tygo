@@ -31,6 +31,7 @@ packages:
       import * as bookapp from "../bookstore"
   - path: "github.com/gzuidhof/tygo/examples/generic"
     fallback_type: unknown
+  - path: "github.com/gzuidhof/tygo/examples/generic_any"
   - path: "github.com/gzuidhof/tygo/examples/preserveTypeComments"
     fallback_type: unknown
     preserve_comments: "types"
@@ -50,5 +51,9 @@ packages:
     flavor: "yaml"
   - path: "github.com/gzuidhof/tygo/examples/interface"
   - path: "github.com/gzuidhof/tygo/examples/directive"
+  - path: "github.com/gzuidhof/tygo/examples/emit"
+    exclude_files: 
+      - "excluded.go"
+  - path: "github.com/gzuidhof/tygo/examples/rune"
 
 
